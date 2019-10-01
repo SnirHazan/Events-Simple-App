@@ -41,12 +41,12 @@ module.exports = {
       throw new Error('User is Unauthenticated!');
     }
     try {
-      const bookings = await Booking.find();
+      const bookings = await Booking.find({user: req.userId});
       return bookings.map(booking => {
         return transformBooking(booking);
       });
     } catch (error) {
-      throw error;
+      console.log(error);
     }
   },
 

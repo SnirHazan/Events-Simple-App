@@ -2,6 +2,8 @@ import React, {Component, Fragment} from 'react';
 import Modal from '../components/Modal/Modal';
 import BackDrop from '../components/BackDrop/BackDrop';
 import authContext from '../components/context/auth-context';
+import EventList from '../components/Events/EventList/EventList';
+import Spinner from '../components/Spinner/Spinner';
 import './Events.css';
 
 export default class EventsPage extends Component {
@@ -11,8 +13,12 @@ export default class EventsPage extends Component {
 
   state = {
     creating: false,
-    events: []
+    events: [],
+    isLoading: false,
+    selectedEvent: null
   };
+
+  isActive = true;
 
   static contextType = authContext;
 
@@ -53,10 +59,6 @@ export default class EventsPage extends Component {
                     description
                     date
                     price
-                    creator{
-                      _id
-                      email
-                    }
                 }
             }
         `
@@ -79,7 +81,20 @@ export default class EventsPage extends Component {
         return res.json();
       })
       .then(resData => {
-        this.fetchEvents();
+        this.setState(prevState => {
+          const updatedEvents = [...prevState.events];
+          updatedEvents.push({
+            _id: resData.data.createEvent._id,
+            title: resData.data.createEvent.title,
+            description: resData.data.createEvent.description,
+            date: resData.data.createEvent.date,
+            price: resData.data.createEvent.price,
+            creator: {
+              _id: this.context.userId
+            }
+          });
+          return {events: updatedEvents};
+        });
       })
       .catch(err => {
         console.log(err);
@@ -87,10 +102,11 @@ export default class EventsPage extends Component {
   };
 
   modalCancelHandler = () => {
-    this.setState({creating: false});
+    this.setState({creating: false, selectedEvent: null});
   };
 
   fetchEvents() {
+    this.setState({isLoading: true});
     const requestBody = {
       query: `
             query {
@@ -126,23 +142,73 @@ export default class EventsPage extends Component {
       })
       .then(resData => {
         const events = resData.data.events;
-        this.setState({events});
+        if (this.isActive) {
+          this.setState({events, isLoading: false});
+        }
       })
       .catch(err => {
         console.log(err);
+        this.setState({isLoading: false});
       });
   }
-  render() {
-    const eventList = this.state.events.map(event => {
-      return (
-        <li className="events__list-item" key={event._id}>
-          {event.title} - price: {event.price}
-        </li>
-      );
+
+  showDetailHandler = eventId => {
+    this.setState(prevState => {
+      const event = prevState.events.find(e => e._id === eventId);
+      return {selectedEvent: event};
     });
+  };
+
+  bookEventHandler = () => {
+    if (!this.context.token) {
+      this.setState({selectedEvent: null});
+      return;
+    }
+    const requestBody = {
+      query: `
+            mutation {
+                bookEvent(eventId: "${this.state.selectedEvent._id}") {
+                    _id
+                    createdAt
+                    updatedAt
+                }
+            }
+        `
+    };
+
+    const token = this.context.token;
+    //Request
+    fetch('http://localhost:4000/graphql', {
+      method: 'POST',
+      body: JSON.stringify(requestBody),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + token
+      }
+    })
+      .then(res => {
+        if (res.status !== 200 && res.status !== 201) {
+          throw new Error('Failed!');
+        }
+        return res.json();
+      })
+      .then(resData => {
+        console.log(resData);
+        this.setState({selectedEvent: null});
+      })
+      .catch(err => {
+        console.log(err);
+        this.setState({selectedEvent: null});
+      });
+  };
+
+  componentWillUnmount() {
+    this.isActive = false;
+  }
+  render() {
     return (
       <Fragment>
-        {this.state.creating && <BackDrop />}
+        {(this.state.creating || this.state.selectedEvent) && <BackDrop />}
         {this.state.creating && (
           <Modal
             title="Add Event"
@@ -150,6 +216,7 @@ export default class EventsPage extends Component {
             canConfirm
             onCancel={this.modalCancelHandler}
             onConfirm={this.modalConfirmHandler}
+            confirmText="Confirm"
           >
             <form>
               <div className="form-control">
@@ -171,6 +238,23 @@ export default class EventsPage extends Component {
             </form>
           </Modal>
         )}
+        {this.state.selectedEvent && (
+          <Modal
+            title={this.state.selectedEvent.title}
+            canCancel
+            canConfirm
+            onCancel={this.modalCancelHandler}
+            onConfirm={this.bookEventHandler}
+            confirmText={this.context.token ? 'Book' : 'Confirm'}
+          >
+            <h1>{this.state.selectedEvent.title}</h1>
+            <h2>
+              ${this.state.selectedEvent.price} -{' '}
+              {new Date(this.state.selectedEvent.data).toLocaleDateString()}
+            </h2>
+            <p>{this.state.selectedEvent.description}</p>
+          </Modal>
+        )}
         {this.context.token && (
           <div className="events-control">
             <p>Share Your Own Event!</p>
@@ -179,7 +263,15 @@ export default class EventsPage extends Component {
             </button>
           </div>
         )}
-        <ul className="events__list">{eventList}</ul>
+        {this.state.isLoading ? (
+          <Spinner />
+        ) : (
+          <EventList
+            events={this.state.events}
+            authUserId={this.context.userId}
+            onViewDetail={this.showDetailHandler}
+          />
+        )}
       </Fragment>
     );
   }
